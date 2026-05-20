@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useLocation } from 'react-router-dom';
-import { Copy, Users, FolderOpen, ListVideo, GraduationCap, ChevronDown, ChevronRight } from 'lucide-react';
+import { Copy, Users, FolderOpen, GraduationCap, ChevronDown, ChevronRight } from 'lucide-react';
 import { socket } from '../socket';
 import VideoPlayer from './VideoPlayer';
 import ChatSidebar from './ChatSidebar';
@@ -17,7 +17,7 @@ export default function Room() {
     time: 0,
     users: 0,
     fileIndex: 0,
-    isLocal: false // Server now tracks if the room is currently in local mode
+    isLocal: false
   });
 
   const username = location.state?.username || 'Anonymous';
@@ -26,7 +26,9 @@ export default function Room() {
   const [localFileUrl, setLocalFileUrl] = useState<string | null>(null);
   const [sortedFiles, setSortedFiles] = useState<File[]>([]);
   const [sidebarTab, setSidebarTab] = useState<'local' | 'course'>('local');
+  
   const [expandedSteps, setExpandedSteps] = useState<Record<number, boolean>>({});
+  const [expandedSubSteps, setExpandedSubSteps] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     if (!roomId) return;
@@ -41,9 +43,8 @@ export default function Room() {
 
     socket.on('room_state', (state) => {
       setRoomState(state);
-      // Auto-switch tab if room is local
       if (state.url === 'LOCAL_FILE') setSidebarTab('local');
-      else if (state.url.includes('youtube')) setSidebarTab('course');
+      else if (state.url.includes('youtube') || state.url.includes('youtu.be')) setSidebarTab('course');
     });
 
     socket.on('video_update', (data) => {
@@ -88,13 +89,17 @@ export default function Room() {
     setExpandedSteps(prev => ({ ...prev, [idx]: !prev[idx] }));
   };
 
+  const toggleSubStep = (stepIdx: number, subIdx: number) => {
+    const key = `${stepIdx}-${subIdx}`;
+    setExpandedSubSteps(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
   const copyRoomId = () => {
     if (roomId) navigator.clipboard.writeText(roomId);
   };
 
   return (
     <div className="room-layout">
-      {/* Sidebar Area */}
       <aside className="chat-sidebar" style={{ width: '380px' }}>
         <div style={{ display: 'flex', borderBottom: '1px solid var(--border)' }}>
           <button 
@@ -122,7 +127,12 @@ export default function Room() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <label className="copy-btn" style={{ cursor: 'pointer', background: 'var(--success)', marginBottom: '10px' }}>
                 <FolderOpen size={18} /> {sortedFiles.length > 0 ? 'Change Folder' : 'Select Folder'}
-                <input type="file" webkitdirectory="true" onChange={handleFolderChange} style={{ display: 'none' }} />
+                <input 
+                  type="file" 
+                  {...({ webkitdirectory: "true", directory: "" } as any)} 
+                  onChange={handleFolderChange} 
+                  style={{ display: 'none' }} 
+                />
               </label>
               {sortedFiles.map((file, idx) => (
                 <button key={idx} onClick={() => selectLocalVideo(idx)} style={{
@@ -145,16 +155,33 @@ export default function Room() {
                     <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>{step.title}</span>
                     {expandedSteps[sIdx] ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                   </button>
+                  
                   {expandedSteps[sIdx] && (
-                    <div style={{ paddingLeft: '10px', marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                      {step.videos.map((vid, vIdx) => (
-                        <button key={vIdx} onClick={() => selectCourseVideo(vid.url)} style={{
-                          textAlign: 'left', padding: '8px 12px', fontSize: '0.8rem', width: '100%', border: 'none', color: 'var(--text-muted)',
-                          background: roomState.url === vid.url ? 'var(--accent)' : 'transparent',
-                          borderRadius: '4px', cursor: 'pointer', color: roomState.url === vid.url ? 'white' : 'var(--text-muted)'
-                        }}>
-                          {vid.title}
-                        </button>
+                    <div style={{ paddingLeft: '10px', marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      {step.subSteps.map((sub, subIdx) => (
+                        <div key={subIdx}>
+                          <button onClick={() => toggleSubStep(sIdx, subIdx)} style={{
+                            width: '100%', textAlign: 'left', background: 'rgba(255,255,255,0.04)', padding: '8px',
+                            display: 'flex', alignItems: 'center', justifyContent: 'space-between', border: 'none', color: 'var(--text-muted)', borderRadius: '4px'
+                          }}>
+                            <span style={{ fontSize: '0.85rem' }}>{sub.title}</span>
+                            {expandedSubSteps[`${sIdx}-${subIdx}`] ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                          </button>
+                          
+                          {expandedSubSteps[`${sIdx}-${subIdx}`] && (
+                            <div style={{ paddingLeft: '10px', marginTop: '2px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                              {sub.topics.map((topic, tIdx) => (
+                                <button key={tIdx} onClick={() => selectCourseVideo(topic.url)} style={{
+                                  textAlign: 'left', padding: '6px 10px', fontSize: '0.75rem', width: '100%', border: 'none',
+                                  background: roomState.url === topic.url ? 'var(--accent)' : 'transparent',
+                                  borderRadius: '4px', cursor: 'pointer', color: roomState.url === topic.url ? 'white' : 'var(--text-muted)'
+                                }}>
+                                  • {topic.title}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       ))}
                     </div>
                   )}
