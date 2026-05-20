@@ -5,6 +5,7 @@ interface VideoPlayerProps {
   url: string;
   playing: boolean;
   time: number;
+  isLocal?: boolean;
 }
 
 declare global {
@@ -14,15 +15,16 @@ declare global {
   }
 }
 
-export default function VideoPlayer({ url, playing, time }: VideoPlayerProps) {
+export default function VideoPlayer({ url, playing, time, isLocal }: VideoPlayerProps) {
   const playerRef = useRef<any>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
   const [isApiReady, setIsApiReady] = useState(false);
   const [youtubeId, setYoutubeId] = useState<string | null>(null);
   const isInternalChange = useRef(false);
 
   // Load YouTube API
   useEffect(() => {
+    if (isLocal) return;
     if (!window.YT) {
       const tag = document.createElement('script');
       tag.src = "https://www.youtube.com/iframe_api";
@@ -35,20 +37,20 @@ export default function VideoPlayer({ url, playing, time }: VideoPlayerProps) {
     } else {
       setIsApiReady(true);
     }
-  }, []);
+  }, [isLocal]);
 
-  // Extract ID
+  // Extract YouTube ID
   useEffect(() => {
-    if (!url) return;
+    if (!url || isLocal) return;
     const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
     const match = url.match(regExp);
     const id = (match && match[2].length === 11) ? match[2] : null;
     setYoutubeId(id);
-  }, [url]);
+  }, [url, isLocal]);
 
-  // Initialize Player
+  // Initialize YouTube Player
   useEffect(() => {
-    if (isApiReady && youtubeId && containerRef.current && !playerRef.current) {
+    if (!isLocal && isApiReady && youtubeId && !playerRef.current) {
       playerRef.current = new window.YT.Player('yt-player', {
         height: '100%',
         width: '100%',
@@ -67,63 +69,105 @@ export default function VideoPlayer({ url, playing, time }: VideoPlayerProps) {
               isInternalChange.current = false;
               return;
             }
-
             const state = event.data;
             const currentTime = playerRef.current.getCurrentTime();
-
-            // YT.PlayerState.PLAYING = 1, PAUSED = 2
-            if (state === 1) {
-              socket.emit('video_update', { url, playing: true, time: currentTime });
-            } else if (state === 2) {
-              socket.emit('video_update', { url, playing: false, time: currentTime });
+            if (state === 1) { // PLAYING
+              socket.emit('video_update', { playing: true, time: currentTime });
+            } else if (state === 2) { // PAUSED
+              socket.emit('video_update', { playing: false, time: currentTime });
             }
           }
         }
       });
     }
-    
-    // Cleanup player if ID changes
-    return () => {
-      if (playerRef.current && playerRef.current.destroy) {
-        // Only destroy if we are actually changing the video
-      }
-    };
-  }, [isApiReady, youtubeId]);
+  }, [isLocal, isApiReady, youtubeId]);
 
-  // Sync state from server
+  // Sync YouTube state
   useEffect(() => {
-    if (playerRef.current && playerRef.current.getPlayerState) {
+    if (!isLocal && playerRef.current && playerRef.current.getPlayerState) {
       const serverPlaying = playing;
       const localPlaying = playerRef.current.getPlayerState() === 1;
       const currentTime = playerRef.current.getCurrentTime();
 
       isInternalChange.current = true;
-
-      // Sync playing state
       if (serverPlaying !== localPlaying) {
         if (serverPlaying) playerRef.current.playVideo();
         else playerRef.current.pauseVideo();
       }
-
-      // Sync time
       if (Math.abs(currentTime - time) > 2) {
         playerRef.current.seekTo(time, true);
       }
     }
-  }, [playing, time]);
+  }, [isLocal, playing, time]);
 
-  if (!url) {
+  // Handle Local Video Events
+  const handleLocalPlay = () => {
+    if (isInternalChange.current) {
+      isInternalChange.current = false;
+      return;
+    }
+    if (videoRef.current) {
+      // In local mode, never emit the 'url' because it's a local blob: URL
+      socket.emit('video_update', { playing: true, time: videoRef.current.currentTime });
+    }
+  };
+
+  const handleLocalPause = () => {
+    if (isInternalChange.current) {
+      isInternalChange.current = false;
+      return;
+    }
+    if (videoRef.current) {
+      socket.emit('video_update', { playing: false, time: videoRef.current.currentTime });
+    }
+  };
+
+  const handleLocalSeek = () => {
+    if (isInternalChange.current) return;
+    if (videoRef.current) {
+      socket.emit('video_update', { playing: !videoRef.current.paused, time: videoRef.current.currentTime });
+    }
+  };
+
+  // Sync Local state
+  useEffect(() => {
+    if (isLocal && videoRef.current) {
+      isInternalChange.current = true;
+      if (playing && videoRef.current.paused) {
+        videoRef.current.play().catch(() => {});
+      } else if (!playing && !videoRef.current.paused) {
+        videoRef.current.pause();
+      }
+
+      if (Math.abs(videoRef.current.currentTime - time) > 2) {
+        videoRef.current.currentTime = time;
+      }
+    }
+  }, [isLocal, playing, time]);
+
+  if (!url || url === 'LOCAL_WAITING' || url === 'LOCAL_FILE') {
     return (
-      <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8' }}>
-        <p>Waiting for video URL...</p>
+      <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', background: '#000', borderRadius: '8px' }}>
+        <p>{isLocal ? 'Please select a local MP4 file...' : 'Waiting for video URL...'}</p>
       </div>
     );
   }
 
   return (
-    <div ref={containerRef} style={{ position: 'relative', width: '100%', height: '100%', minHeight: '450px', background: '#000' }}>
-      <div id="yt-player" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}></div>
+    <div style={{ position: 'relative', width: '100%', height: '100%', minHeight: '450px', background: '#000', borderRadius: '8px', overflow: 'hidden' }}>
+      {isLocal ? (
+        <video 
+          ref={videoRef}
+          src={url}
+          controls
+          style={{ width: '100%', height: '100%' }}
+          onPlay={handleLocalPlay}
+          onPause={handleLocalPause}
+          onSeeked={handleLocalSeek}
+        />
+      ) : (
+        <div id="yt-player" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}></div>
+      )}
     </div>
   );
 }
-

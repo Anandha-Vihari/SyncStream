@@ -6,18 +6,23 @@ export default function Landing() {
   const [videoUrl, setVideoUrl] = useState('');
   const [roomId, setRoomId] = useState('');
   const [username, setUsername] = useState('');
+  const [isLocalMode, setIsLocalMode] = useState(false);
   const navigate = useNavigate();
 
   const handleCreateRoom = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!videoUrl || !username) return;
+    if ((!videoUrl && !isLocalMode) || !username) return;
     
     // Generate a random 6-character room ID
     const newRoomId = Math.random().toString(36).substring(2, 8).toUpperCase();
     
     // Use URLSearchParams to build the query string cleanly
     const params = new URLSearchParams();
-    params.set('url', videoUrl);
+    if (isLocalMode) {
+      params.set('mode', 'local');
+    } else {
+      params.set('url', videoUrl);
+    }
     
     navigate(`/room/${newRoomId}?${params.toString()}`, { state: { username, isCreator: true } });
   };
@@ -33,7 +38,7 @@ export default function Landing() {
     <div className="landing-container">
       <div className="landing-card">
         <div className="landing-header">
-          <h1>SyncWatch</h1>
+          <h1>SyncStream</h1>
           <p>Watch videos together in perfect sync.</p>
         </div>
 
@@ -48,17 +53,42 @@ export default function Landing() {
           />
         </div>
 
+        <div style={{ display: 'flex', gap: '10px', marginBottom: '1.5rem' }}>
+           <button 
+             type="button"
+             onClick={() => setIsLocalMode(false)} 
+             style={{ flex: 1, background: !isLocalMode ? 'var(--accent)' : 'var(--bg-input)' }}
+           >
+             Online URL
+           </button>
+           <button 
+             type="button"
+             onClick={() => setIsLocalMode(true)} 
+             style={{ flex: 1, background: isLocalMode ? 'var(--accent)' : 'var(--bg-input)' }}
+           >
+             Local File
+           </button>
+        </div>
+
         <form onSubmit={handleCreateRoom}>
-          <div className="form-group">
-            <label>Create a new room</label>
-            <input 
-              type="url" 
-              placeholder="Paste Video URL (YouTube, Vimeo, etc.)" 
-              value={videoUrl}
-              onChange={(e) => setVideoUrl(e.target.value)}
-            />
-          </div>
-          <button type="submit" disabled={!videoUrl || !username} style={{ width: '100%' }}>
+          {!isLocalMode ? (
+            <div className="form-group">
+              <label>Create a new room</label>
+              <input 
+                type="url" 
+                placeholder="Paste Video URL (YouTube, Vimeo, etc.)" 
+                value={videoUrl}
+                onChange={(e) => setVideoUrl(e.target.value)}
+              />
+            </div>
+          ) : (
+            <div className="form-group">
+              <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
+                You and your friends must have the **same video file** on your devices. We will only sync the timing, not the file itself.
+              </p>
+            </div>
+          )}
+          <button type="submit" disabled={(!videoUrl && !isLocalMode) || !username} style={{ width: '100%' }}>
             <Play size={18} /> Create Room
           </button>
         </form>
