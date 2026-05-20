@@ -6,6 +6,7 @@ interface VideoPlayerProps {
   playing: boolean;
   time: number;
   isLocal?: boolean;
+  onEnded?: () => void;
 }
 
 declare global {
@@ -15,7 +16,7 @@ declare global {
   }
 }
 
-export default function VideoPlayer({ url, playing, time, isLocal }: VideoPlayerProps) {
+export default function VideoPlayer({ url, playing, time, isLocal, onEnded }: VideoPlayerProps) {
   const playerRef = useRef<any>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isApiReady, setIsApiReady] = useState(false);
@@ -72,15 +73,17 @@ export default function VideoPlayer({ url, playing, time, isLocal }: VideoPlayer
             const state = event.data;
             const currentTime = playerRef.current.getCurrentTime();
             if (state === 1) { // PLAYING
-              socket.emit('video_update', { playing: true, time: currentTime });
+              socket.emit('video_update', { url, playing: true, time: currentTime });
             } else if (state === 2) { // PAUSED
-              socket.emit('video_update', { playing: false, time: currentTime });
+              socket.emit('video_update', { url, playing: false, time: currentTime });
+            } else if (state === 0) { // ENDED
+              if (onEnded) onEnded();
             }
           }
         }
       });
     }
-  }, [isLocal, isApiReady, youtubeId]);
+  }, [isLocal, isApiReady, youtubeId, onEnded]);
 
   // Sync YouTube state
   useEffect(() => {
@@ -107,7 +110,6 @@ export default function VideoPlayer({ url, playing, time, isLocal }: VideoPlayer
       return;
     }
     if (videoRef.current) {
-      // In local mode, never emit the 'url' because it's a local blob: URL
       socket.emit('video_update', { playing: true, time: videoRef.current.currentTime });
     }
   };
@@ -148,7 +150,7 @@ export default function VideoPlayer({ url, playing, time, isLocal }: VideoPlayer
   if (!url || url === 'LOCAL_WAITING' || url === 'LOCAL_FILE') {
     return (
       <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', background: '#000', borderRadius: '8px' }}>
-        <p>{isLocal ? 'Please select a local MP4 file...' : 'Waiting for video URL...'}</p>
+        <p>{isLocal ? 'Please select your media folder...' : 'Waiting for video URL...'}</p>
       </div>
     );
   }
@@ -164,6 +166,7 @@ export default function VideoPlayer({ url, playing, time, isLocal }: VideoPlayer
           onPlay={handleLocalPlay}
           onPause={handleLocalPause}
           onSeeked={handleLocalSeek}
+          onEnded={onEnded}
         />
       ) : (
         <div id="yt-player" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}></div>
