@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useParams, useLocation } from 'react-router-dom';
-import { Copy, Users, FolderOpen, ListVideo, MessageSquare } from 'lucide-react';
+import { Copy, Users, FolderOpen, ListVideo, GraduationCap, ChevronDown, ChevronRight } from 'lucide-react';
 import { socket } from '../socket';
 import VideoPlayer from './VideoPlayer';
 import ChatSidebar from './ChatSidebar';
+import { dsaCourseData } from '../data/dsaCourse';
 
 export default function Room() {
   const { roomId } = useParams<{ roomId: string }>();
@@ -15,26 +16,34 @@ export default function Room() {
     playing: false,
     time: 0,
     users: 0,
-    fileIndex: 0
+    fileIndex: 0,
+    isLocal: false // Server now tracks if the room is currently in local mode
   });
 
   const username = location.state?.username || 'Anonymous';
   const isUrlLocalParam = queryParams.get('mode') === 'local';
   
-  const [isLocalMode, setIsLocalMode] = useState(isUrlLocalParam);
   const [localFileUrl, setLocalFileUrl] = useState<string | null>(null);
   const [sortedFiles, setSortedFiles] = useState<File[]>([]);
-  const [showPlaylist, setShowPlaylist] = useState(true); // Toggle for playlist view
+  const [sidebarTab, setSidebarTab] = useState<'local' | 'course'>('local');
+  const [expandedSteps, setExpandedSteps] = useState<Record<number, boolean>>({});
 
   useEffect(() => {
     if (!roomId) return;
     socket.connect();
     const initialUrl = queryParams.get('url') || '';
-    socket.emit('join_room', { roomId, username, videoUrl: isUrlLocalParam ? 'LOCAL_FILE' : initialUrl });
+    
+    socket.emit('join_room', { 
+      roomId, 
+      username, 
+      videoUrl: isUrlLocalParam ? 'LOCAL_FILE' : initialUrl 
+    });
 
     socket.on('room_state', (state) => {
       setRoomState(state);
-      if (state.url === 'LOCAL_FILE') setIsLocalMode(true);
+      // Auto-switch tab if room is local
+      if (state.url === 'LOCAL_FILE') setSidebarTab('local');
+      else if (state.url.includes('youtube')) setSidebarTab('course');
     });
 
     socket.on('video_update', (data) => {
@@ -49,40 +58,34 @@ export default function Room() {
   }, [roomId, username, isUrlLocalParam]);
 
   useEffect(() => {
-    if (isLocalMode && sortedFiles.length > roomState.fileIndex) {
+    if (roomState.isLocal && sortedFiles.length > roomState.fileIndex) {
       const file = sortedFiles[roomState.fileIndex];
       const url = URL.createObjectURL(file);
       setLocalFileUrl(url);
-      console.log(`Switched to file index ${roomState.fileIndex}: ${file.name}`);
     }
-  }, [roomState.fileIndex, sortedFiles, isLocalMode]);
+  }, [roomState.fileIndex, sortedFiles, roomState.isLocal]);
 
   const handleFolderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
-    const videoFiles = files.filter(f => f.type.startsWith('video/') || f.name.endsWith('.mp4') || f.name.endsWith('.mkv') || f.name.endsWith('.webm'));
-    
-    // Sort by lastModified date
+    const videoFiles = files.filter(f => f.type.startsWith('video/') || f.name.endsWith('.mp4') || f.name.endsWith('.mkv'));
     const sorted = videoFiles.sort((a, b) => a.lastModified - b.lastModified);
     setSortedFiles(sorted);
-    
     if (sorted.length > 0) {
-      const currentIdx = roomState.fileIndex || 0;
-      if (sorted[currentIdx]) {
-        setLocalFileUrl(URL.createObjectURL(sorted[currentIdx]));
-      }
-      socket.emit('chat_message', `DEBUG: Loaded folder with ${sorted.length} videos.`);
+      setLocalFileUrl(URL.createObjectURL(sorted[roomState.fileIndex || 0]));
+      socket.emit('video_update', { isLocal: true, url: 'LOCAL_FILE' });
     }
   };
 
-  const handleVideoEnded = () => {
-    const nextIndex = roomState.fileIndex + 1;
-    if (nextIndex < sortedFiles.length) {
-      socket.emit('video_update', { fileIndex: nextIndex, time: 0, playing: true });
-    }
+  const selectLocalVideo = (index: number) => {
+    socket.emit('video_update', { isLocal: true, url: 'LOCAL_FILE', fileIndex: index, time: 0, playing: true });
   };
 
-  const selectVideo = (index: number) => {
-    socket.emit('video_update', { fileIndex: index, time: 0, playing: true });
+  const selectCourseVideo = (url: string) => {
+    socket.emit('video_update', { isLocal: false, url, time: 0, playing: true });
+  };
+
+  const toggleStep = (idx: number) => {
+    setExpandedSteps(prev => ({ ...prev, [idx]: !prev[idx] }));
   };
 
   const copyRoomId = () => {
@@ -92,89 +95,83 @@ export default function Room() {
   return (
     <div className="room-layout">
       {/* Sidebar Area */}
-      <aside className="chat-sidebar" style={{ width: showPlaylist ? '350px' : '60px', transition: 'width 0.3s' }}>
-        <div className="chat-header" style={{ justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', overflow: 'hidden' }}>
-            <ListVideo size={20} className={showPlaylist ? 'text-accent' : ''} style={{ flexShrink: 0 }} />
-            {showPlaylist && <h3>Playlist</h3>}
-          </div>
+      <aside className="chat-sidebar" style={{ width: '380px' }}>
+        <div style={{ display: 'flex', borderBottom: '1px solid var(--border)' }}>
           <button 
-            onClick={() => setShowPlaylist(!showPlaylist)} 
-            style={{ padding: '4px', background: 'transparent', color: 'var(--text-muted)' }}
+            onClick={() => setSidebarTab('local')}
+            style={{ 
+              flex: 1, borderRadius: 0, background: sidebarTab === 'local' ? 'var(--bg-input)' : 'transparent',
+              borderBottom: sidebarTab === 'local' ? '2px solid var(--accent)' : 'none'
+            }}
           >
-            {showPlaylist ? '→' : '←'}
+            <FolderOpen size={16} /> Local
+          </button>
+          <button 
+            onClick={() => setSidebarTab('course')}
+            style={{ 
+              flex: 1, borderRadius: 0, background: sidebarTab === 'course' ? 'var(--bg-input)' : 'transparent',
+              borderBottom: sidebarTab === 'course' ? '2px solid var(--accent)' : 'none'
+            }}
+          >
+            <GraduationCap size={16} /> A2Z Course
           </button>
         </div>
 
-        {showPlaylist ? (
-          <div className="messages-container" style={{ padding: '0.5rem' }}>
-            {!isLocalMode ? (
-              <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
-                Playlist only available in Local Folder mode.
-              </div>
-            ) : sortedFiles.length === 0 ? (
-              <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
-                Please select a folder to see videos.
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                {sortedFiles.map((file, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => selectVideo(idx)}
-                    style={{
-                      textAlign: 'left',
-                      padding: '10px 12px',
-                      background: roomState.fileIndex === idx ? 'var(--accent)' : 'rgba(255,255,255,0.05)',
-                      borderRadius: '4px',
-                      fontSize: '0.85rem',
-                      display: 'block',
-                      width: '100%',
-                      border: 'none',
-                      color: 'white',
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    {idx + 1}. {file.name}
+        <div className="messages-container" style={{ padding: '0.5rem' }}>
+          {sidebarTab === 'local' ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <label className="copy-btn" style={{ cursor: 'pointer', background: 'var(--success)', marginBottom: '10px' }}>
+                <FolderOpen size={18} /> {sortedFiles.length > 0 ? 'Change Folder' : 'Select Folder'}
+                <input type="file" webkitdirectory="true" onChange={handleFolderChange} style={{ display: 'none' }} />
+              </label>
+              {sortedFiles.map((file, idx) => (
+                <button key={idx} onClick={() => selectLocalVideo(idx)} style={{
+                  textAlign: 'left', padding: '10px', fontSize: '0.85rem', width: '100%', border: 'none', color: 'white',
+                  background: (roomState.isLocal && roomState.fileIndex === idx) ? 'var(--accent)' : 'rgba(255,255,255,0.05)',
+                  borderRadius: '4px', cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
+                }}>
+                  {idx + 1}. {file.name}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              {dsaCourseData.map((step, sIdx) => (
+                <div key={sIdx} style={{ marginBottom: '4px' }}>
+                  <button onClick={() => toggleStep(sIdx)} style={{
+                    width: '100%', textAlign: 'left', background: 'rgba(255,255,255,0.08)', padding: '10px',
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between', border: 'none', color: 'white', borderRadius: '4px'
+                  }}>
+                    <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>{step.title}</span>
+                    {expandedSteps[sIdx] ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                   </button>
-                ))}
-              </div>
-            )}
-          </div>
-        ) : null}
-
-        {/* Chat Toggle/Indicator when collapsed */}
-        {!showPlaylist && (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2rem', marginTop: '2rem' }}>
-             <MessageSquare size={20} />
-             <Users size={20} />
-          </div>
-        )}
+                  {expandedSteps[sIdx] && (
+                    <div style={{ paddingLeft: '10px', marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                      {step.videos.map((vid, vIdx) => (
+                        <button key={vIdx} onClick={() => selectCourseVideo(vid.url)} style={{
+                          textAlign: 'left', padding: '8px 12px', fontSize: '0.8rem', width: '100%', border: 'none', color: 'var(--text-muted)',
+                          background: roomState.url === vid.url ? 'var(--accent)' : 'transparent',
+                          borderRadius: '4px', cursor: 'pointer', color: roomState.url === vid.url ? 'white' : 'var(--text-muted)'
+                        }}>
+                          {vid.title}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </aside>
 
       <div className="main-content" style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
         <header className="room-header">
           <div className="room-info">
             <h2>Room: {roomId}</h2>
-            <p>{isLocalMode ? `Folder Sync (${sortedFiles.length} files)` : 'SyncWatch Party'}</p>
+            <p>{roomState.isLocal ? 'Folder Sync' : 'Online Course Mode'}</p>
           </div>
           <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-            {isLocalMode && (
-              <label className="copy-btn" style={{ cursor: 'pointer', background: 'var(--success)' }}>
-                <FolderOpen size={18} /> {sortedFiles.length > 0 ? 'Change Folder' : 'Select Folder'}
-                <input 
-                  type="file" 
-                  // @ts-ignore
-                  webkitdirectory="true" 
-                  directory="" 
-                  onChange={handleFolderChange} 
-                  style={{ display: 'none' }} 
-                />
-              </label>
-            )}
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-muted)' }}>
               <Users size={18} /> {roomState.users || 1}
             </div>
@@ -186,16 +183,19 @@ export default function Room() {
 
         <div className="video-container">
           <VideoPlayer 
-            url={isLocalMode ? (localFileUrl || 'LOCAL_WAITING') : roomState.url} 
+            url={roomState.isLocal ? (localFileUrl || 'LOCAL_WAITING') : roomState.url} 
             playing={roomState.playing} 
             time={roomState.time}
-            isLocal={isLocalMode}
-            onEnded={handleVideoEnded}
+            isLocal={roomState.isLocal}
+            onEnded={() => {
+              if (roomState.isLocal) {
+                const next = roomState.fileIndex + 1;
+                if (next < sortedFiles.length) selectLocalVideo(next);
+              }
+            }}
           />
         </div>
       </div>
-      
-      {/* Keep chat on the right */}
       <ChatSidebar username={username} />
     </div>
   );
