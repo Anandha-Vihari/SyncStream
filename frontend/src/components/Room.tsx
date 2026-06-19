@@ -11,18 +11,19 @@ export default function Room() {
   const location = useLocation();
   const queryParams = new URLSearchParams(location.search);
   
+  const username = location.state?.username || 'Anonymous';
+  const isUrlLocalParam = queryParams.get('mode') === 'local';
+  const initialUrl = (queryParams.get('url') || '').trim();
+  
   const [roomState, setRoomState] = useState({
-    url: '',
+    url: isUrlLocalParam ? 'LOCAL_FILE' : initialUrl,
     playing: false,
     time: 0,
     users: 0,
     fileIndex: 0,
-    isLocal: false
+    isLocal: isUrlLocalParam
   });
 
-  const username = location.state?.username || 'Anonymous';
-  const isUrlLocalParam = queryParams.get('mode') === 'local';
-  
   const [localFileUrl, setLocalFileUrl] = useState<string | null>(null);
   const [sortedFiles, setSortedFiles] = useState<File[]>([]);
   const [sidebarTab, setSidebarTab] = useState<'local' | 'course'>('local');
@@ -34,7 +35,6 @@ export default function Room() {
   useEffect(() => {
     if (!roomId) return;
     socket.connect();
-    const initialUrl = queryParams.get('url') || '';
     
     socket.emit('join_room', { 
       roomId, 
@@ -60,7 +60,7 @@ export default function Room() {
       socket.off('video_update');
       socket.disconnect();
     };
-  }, [roomId, username, isUrlLocalParam]);
+  }, [roomId, username, isUrlLocalParam, initialUrl]);
 
   useEffect(() => {
     if (roomState.isLocal && sortedFiles.length > roomState.fileIndex) {

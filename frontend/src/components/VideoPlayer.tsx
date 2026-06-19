@@ -25,9 +25,14 @@ export default function VideoPlayer({ url, playing, time, isLocal, onEnded }: Vi
   // Extract YouTube ID synchronously during render to prevent DOM thrashing
   const youtubeId = (() => {
     if (!url || isLocal) return null;
-    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
-    const match = url.match(regExp);
-    return (match && match[2].length === 11) ? match[2] : null;
+    const trimmed = url.trim();
+    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\? ]*).*/;
+    const match = trimmed.match(regExp);
+    if (match && match[2]) {
+      const id = match[2].trim();
+      return id.length === 11 ? id : null;
+    }
+    return null;
   })();
 
   const isYouTube = !isLocal && youtubeId !== null;
