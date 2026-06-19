@@ -101,9 +101,8 @@ export default function VideoPlayer({ url, playing, time, isLocal, onEnded }: Vi
         playerRef.current = new window.YT.Player(ytContainerRef.current, {
           height: '100%', 
           width: '100%', 
-          videoId: youtubeId,
           playerVars: { 
-            'autoplay': 1, 
+            'autoplay': 0, 
             'controls': 1, 
             'origin': window.location.origin,
             'rel': 0
@@ -111,7 +110,7 @@ export default function VideoPlayer({ url, playing, time, isLocal, onEnded }: Vi
           events: {
             'onReady': () => {
               try {
-                if (playerRef.current && typeof playerRef.current.seekTo === 'function') {
+                if (playerRef.current) {
                   const targetTime = timeRef.current;
                   const targetPlaying = playingRef.current;
 
@@ -119,11 +118,16 @@ export default function VideoPlayer({ url, playing, time, isLocal, onEnded }: Vi
                   lastEmittedTime.current = targetTime;
                   lastEmittedState.current = targetPlaying;
 
-                  playerRef.current.seekTo(targetTime, true);
                   if (targetPlaying) {
-                    playerRef.current.playVideo();
+                    playerRef.current.loadVideoById({
+                      videoId: youtubeId,
+                      startSeconds: targetTime
+                    });
                   } else {
-                    playerRef.current.pauseVideo();
+                    playerRef.current.cueVideoById({
+                      videoId: youtubeId,
+                      startSeconds: targetTime
+                    });
                   }
                 }
               } catch (e) {

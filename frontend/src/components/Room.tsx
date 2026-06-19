@@ -43,7 +43,7 @@ export default function Room() {
     });
 
     socket.on('room_state', (state) => {
-      setRoomState(state);
+      setRoomState(prev => ({ ...prev, ...state }));
       if (state.url === 'LOCAL_FILE') {
         setSidebarTab('local');
       } else if (state.url && (state.url.includes('youtube') || state.url.includes('youtu.be'))) {
