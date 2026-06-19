@@ -19,90 +19,223 @@ declare global {
 export default function VideoPlayer({ url, playing, time, isLocal, onEnded }: VideoPlayerProps) {
   const playerRef = useRef<any>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const ytContainerRef = useRef<HTMLDivElement>(null);
   const [isApiReady, setIsApiReady] = useState(false);
-  const [youtubeId, setYoutubeId] = useState<string | null>(null);
-  const lastEmittedTime = useRef(0);
-  const lastEmittedState = useRef<boolean | null>(null);
+  
+  // Extract YouTube ID synchronously during render to prevent DOM thrashing
+  const youtubeId = (() => {
+    if (!url || isLocal) return null;
+    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+    const match = url.match(regExp);
+    return (match && match[2].length === 11) ? match[2] : null;
+  })();
 
-  // Load YouTube API
+  const isYouTube = !isLocal && youtubeId !== null;
+
+  // Initialize refs to initial props to prevent boot-up loops
+  const lastEmittedTime = useRef(time);
+  const lastEmittedState = useRef<boolean | null>(playing);
+
+  // Use refs to avoid stale closures in YouTube callbacks
+  const playingRef = useRef(playing);
+  const timeRef = useRef(time);
+  const onEndedRef = useRef(onEnded);
+
+  // Sync props to refs on every render
   useEffect(() => {
-    if (!window.YT) {
+    playingRef.current = playing;
+    timeRef.current = time;
+    onEndedRef.current = onEnded;
+  }, [playing, time, onEnded]);
+
+  // Load YouTube API with fallback polling and duplicate script checks
+  useEffect(() => {
+    const checkApi = () => {
+      if (window.YT && window.YT.Player) {
+        setIsApiReady(true);
+        return true;
+      }
+      return false;
+    };
+
+    if (checkApi()) return;
+
+    // Save previous callback to avoid overwriting other initializations
+    const previousCallback = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = () => {
+      if (previousCallback) previousCallback();
+      setIsApiReady(true);
+    };
+
+    // Fallback polling in case the script tag was cued but event didn't fire
+    const interval = setInterval(() => {
+      if (checkApi()) {
+        clearInterval(interval);
+      }
+    }, 100);
+
+    const scripts = Array.from(document.getElementsByTagName('script'));
+    const hasScript = scripts.some(s => s.src.includes("youtube.com/iframe_api"));
+    
+    if (!hasScript) {
       const tag = document.createElement('script');
       tag.src = "https://www.youtube.com/iframe_api";
       const firstScriptTag = document.getElementsByTagName('script')[0];
       firstScriptTag.parentNode?.insertBefore(tag, firstScriptTag);
-      window.onYouTubeIframeAPIReady = () => setIsApiReady(true);
-    } else {
-      setIsApiReady(true);
     }
-  }, []);
 
-  // Extract YouTube ID when URL changes (only if not local)
-  useEffect(() => {
-    if (!url || isLocal) {
-      setYoutubeId(null);
-      return;
-    }
-    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
-    const match = url.match(regExp);
-    const id = (match && match[2].length === 11) ? match[2] : null;
-    setYoutubeId(id);
-  }, [url, isLocal]);
+    return () => {
+      clearInterval(interval);
+    };
+  }, []);
 
   // Initialize/Update YouTube Player
   useEffect(() => {
-    if (!isLocal && isApiReady && youtubeId) {
+    if (isYouTube && isApiReady && youtubeId && ytContainerRef.current) {
       if (!playerRef.current) {
-        playerRef.current = new window.YT.Player('yt-player', {
-          height: '100%', width: '100%', videoId: youtubeId,
-          playerVars: { 'autoplay': 1, 'controls': 1, 'origin': window.location.origin },
+        playerRef.current = new window.YT.Player(ytContainerRef.current, {
+          height: '100%', 
+          width: '100%', 
+          videoId: youtubeId,
+          playerVars: { 
+            'autoplay': 1, 
+            'controls': 1, 
+            'origin': window.location.origin,
+            'rel': 0
+          },
           events: {
+            'onReady': () => {
+              try {
+                if (playerRef.current && typeof playerRef.current.seekTo === 'function') {
+                  const targetTime = timeRef.current;
+                  const targetPlaying = playingRef.current;
+
+                  // Set the tracking refs to match initial sync values
+                  lastEmittedTime.current = targetTime;
+                  lastEmittedState.current = targetPlaying;
+
+                  playerRef.current.seekTo(targetTime, true);
+                  if (targetPlaying) {
+                    playerRef.current.playVideo();
+                  } else {
+                    playerRef.current.pauseVideo();
+                  }
+                }
+              } catch (e) {
+                console.error("Error in onReady:", e);
+              }
+            },
             'onStateChange': (event: any) => {
-              const state = event.data;
-              const currentTime = playerRef.current.getCurrentTime();
-              const isPlaying = state === 1;
-              if (lastEmittedState.current === isPlaying && Math.abs(lastEmittedTime.current - currentTime) < 1) return;
-              if (state === 1 || state === 2) {
+              try {
+                const state = event.data;
+                if (!playerRef.current || typeof playerRef.current.getCurrentTime !== 'function') return;
+                
+                // If ended (0), fire onEnded callback
+                if (state === 0) {
+                  if (onEndedRef.current) onEndedRef.current();
+                  return;
+                }
+
+                // We only care about playing (1) and paused (2) transitions.
+                if (state !== 1 && state !== 2) {
+                  return;
+                }
+
+                const currentTime = playerRef.current.getCurrentTime();
+                const isPlaying = state === 1;
+                
+                // Prevent duplicate emissions for the same state and very close timestamps
+                if (lastEmittedState.current === isPlaying && Math.abs(lastEmittedTime.current - currentTime) < 2.0) {
+                  return;
+                }
+                
                 lastEmittedState.current = isPlaying;
                 lastEmittedTime.current = currentTime;
                 socket.emit('video_update', { isLocal: false, url, playing: isPlaying, time: currentTime });
-              } else if (state === 0 && onEnded) onEnded();
+              } catch (e) {
+                console.error("Error in onStateChange:", e);
+              }
             }
           }
         });
-      } else {
-        // If player exists, just load the new video ID
-        playerRef.current.loadVideoById(youtubeId);
       }
     }
     
     return () => {
-      // We don't necessarily want to destroy the player every time, 
-      // but if we switch TO local mode, we should stop it.
-      if (isLocal && playerRef.current) {
-        playerRef.current.pauseVideo();
+      // When unmounting or switching, destroy the player so it can be recreated clean
+      if (playerRef.current) {
+        try {
+          if (typeof playerRef.current.destroy === 'function') {
+            playerRef.current.destroy();
+          }
+        } catch (e) {
+          console.error("Error destroying YouTube player:", e);
+        }
+        playerRef.current = null;
       }
     };
-  }, [isLocal, isApiReady, youtubeId, onEnded]);
+  }, [isYouTube, isApiReady, youtubeId]);
 
   // Sync YouTube state FROM SERVER
   useEffect(() => {
-    if (!isLocal && playerRef.current && playerRef.current.getPlayerState) {
-      const serverPlaying = playing;
-      const localPlaying = playerRef.current.getPlayerState() === 1;
-      const currentTime = playerRef.current.getCurrentTime();
+    if (isYouTube && playerRef.current && typeof playerRef.current.getPlayerState === 'function') {
+      try {
+        const playerState = playerRef.current.getPlayerState();
+        
+        // Treat both playing (1) and buffering (3) as local playing to avoid loop playing calls
+        const localPlaying = playerState === 1 || playerState === 3;
+        const serverPlaying = playing;
 
-      if (serverPlaying !== localPlaying) {
-        lastEmittedState.current = serverPlaying;
-        if (serverPlaying) playerRef.current.playVideo();
-        else playerRef.current.pauseVideo();
-      }
-      if (Math.abs(currentTime - time) > 2) {
-        lastEmittedTime.current = time;
-        playerRef.current.seekTo(time, true);
+        if (serverPlaying !== localPlaying) {
+          lastEmittedState.current = serverPlaying;
+          if (serverPlaying && typeof playerRef.current.playVideo === 'function') {
+            playerRef.current.playVideo();
+          } else if (!serverPlaying && typeof playerRef.current.pauseVideo === 'function') {
+            playerRef.current.pauseVideo();
+          }
+        }
+
+        // Only sync time if the player is NOT currently buffering to prevent lockups
+        if (playerState !== 3) {
+          const currentTime = typeof playerRef.current.getCurrentTime === 'function' 
+            ? playerRef.current.getCurrentTime() 
+            : 0;
+
+          if (Math.abs(currentTime - time) > 3.0 && typeof playerRef.current.seekTo === 'function') {
+            lastEmittedTime.current = time;
+            playerRef.current.seekTo(time, true);
+          }
+        }
+      } catch (e) {
+        console.error("Error during sync update:", e);
       }
     }
-  }, [isLocal, playing, time]);
+  }, [isYouTube, playing, time]);
+
+  // Periodic active sync update (every 5 seconds) to align peers and catch up late joiners
+  useEffect(() => {
+    if (!playing) return;
+
+    const interval = setInterval(() => {
+      try {
+        if ((isLocal || !isYouTube) && videoRef.current && !videoRef.current.paused) {
+          const currentTime = videoRef.current.currentTime;
+          socket.emit('video_update', { isLocal: !!isLocal, time: currentTime });
+        } else if (!isLocal && isYouTube && playerRef.current && typeof playerRef.current.getPlayerState === 'function') {
+          const playerState = playerRef.current.getPlayerState();
+          if (playerState === 1) { // Only emit time update if player is actively playing
+            const currentTime = playerRef.current.getCurrentTime();
+            lastEmittedTime.current = currentTime;
+            socket.emit('video_update', { isLocal: false, url, playing: true, time: currentTime });
+          }
+        }
+      } catch (e) {
+        console.error("Error in periodic sync update:", e);
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [isLocal, isYouTube, playing, url]);
 
   const emitLocalUpdate = (isPlaying: boolean) => {
     if (!videoRef.current) return;
@@ -110,11 +243,11 @@ export default function VideoPlayer({ url, playing, time, isLocal, onEnded }: Vi
     if (lastEmittedState.current === isPlaying && Math.abs(lastEmittedTime.current - currentTime) < 1) return;
     lastEmittedState.current = isPlaying;
     lastEmittedTime.current = currentTime;
-    socket.emit('video_update', { isLocal: true, playing: isPlaying, time: currentTime });
+    socket.emit('video_update', { isLocal: !!isLocal, playing: isPlaying, time: currentTime });
   };
 
   useEffect(() => {
-    if (isLocal && videoRef.current) {
+    if ((isLocal || !isYouTube) && videoRef.current) {
       const serverPlaying = playing;
       const localPlaying = !videoRef.current.paused;
       const currentTime = videoRef.current.currentTime;
@@ -129,19 +262,36 @@ export default function VideoPlayer({ url, playing, time, isLocal, onEnded }: Vi
         videoRef.current.currentTime = time;
       }
     }
-  }, [isLocal, playing, time]);
+  }, [isLocal, isYouTube, playing, time]);
+
+  // Force YouTube controls to hide faster by shifting focus back to the parent page on mouse leave
+  const handleMouseLeave = () => {
+    try {
+      window.focus();
+      if (document.activeElement && document.activeElement.tagName === 'IFRAME') {
+        (document.activeElement as HTMLElement).blur();
+      }
+    } catch (e) {
+      // Ignore
+    }
+  };
 
   if (!url || url === 'LOCAL_WAITING' || url === 'LOCAL_FILE') {
     return (
-      <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', background: '#111', borderRadius: '8px' }}>
-        <p>{isLocal ? 'Please select your media folder...' : 'Select a video from the A2Z Course list...'}</p>
+      <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', background: '#090a12', borderRadius: '8px' }}>
+        <p style={{ textAlign: 'center', padding: '2rem' }}>
+          {isLocal ? 'Please select your media folder to start synchronization...' : 'No online video loaded. Click "Change Video" to load a stream.'}
+        </p>
       </div>
     );
   }
 
   return (
-    <div style={{ position: 'relative', width: '100%', height: '100%', minHeight: '450px', background: '#000', borderRadius: '8px', overflow: 'hidden' }}>
-      {isLocal ? (
+    <div 
+      onMouseLeave={handleMouseLeave}
+      style={{ position: 'relative', width: '100%', height: '100%', minHeight: '480px', background: '#000', borderRadius: '8px', overflow: 'hidden' }}
+    >
+      {isLocal || !isYouTube ? (
         <video 
           ref={videoRef}
           src={url}
@@ -153,7 +303,7 @@ export default function VideoPlayer({ url, playing, time, isLocal, onEnded }: Vi
           onEnded={onEnded}
         />
       ) : (
-        <div id="yt-player" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}></div>
+        <div ref={ytContainerRef} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}></div>
       )}
     </div>
   );

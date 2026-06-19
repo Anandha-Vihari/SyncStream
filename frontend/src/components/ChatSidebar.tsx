@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Send, MessageSquare } from 'lucide-react';
+import { Send, MessageSquare, Copy, Users, Film } from 'lucide-react';
 import { socket } from '../socket';
 
 interface Message {
@@ -8,7 +8,21 @@ interface Message {
   time: string;
 }
 
-export default function ChatSidebar({ username }: { username: string }) {
+interface ChatSidebarProps {
+  username: string;
+  roomId?: string;
+  isLocal?: boolean;
+  usersCount?: number;
+  onChangeVideoClick?: () => void;
+}
+
+export default function ChatSidebar({ 
+  username, 
+  roomId, 
+  isLocal, 
+  usersCount, 
+  onChangeVideoClick 
+}: ChatSidebarProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -43,11 +57,87 @@ export default function ChatSidebar({ username }: { username: string }) {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
+  const handleCopyId = () => {
+    if (roomId) {
+      navigator.clipboard.writeText(roomId);
+    }
+  };
+
   return (
     <aside className="chat-sidebar">
-      <div className="chat-header">
-        <MessageSquare size={20} className="text-accent" />
-        <h3>Room Chat</h3>
+      {/* Sleek dashboard header at the top of the sidebar */}
+      <div style={{ 
+        padding: '1.25rem', 
+        borderBottom: '1px solid var(--border)', 
+        background: 'rgba(0, 0, 0, 0.12)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '0.75rem'
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Room ID
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px' }}>
+              <span style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--text-main)' }}>{roomId}</span>
+              <button 
+                onClick={handleCopyId}
+                style={{ 
+                  background: 'rgba(255,255,255,0.04)', 
+                  border: '1px solid var(--border)', 
+                  padding: '4px 8px', 
+                  borderRadius: '6px', 
+                  fontSize: '0.7rem', 
+                  boxShadow: 'none',
+                  cursor: 'pointer'
+                }}
+              >
+                <Copy size={11} /> Copy
+              </button>
+            </div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Status
+            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '4px', fontSize: '0.8rem', color: 'var(--text-main)', fontWeight: 600 }}>
+              <Users size={13} style={{ color: 'var(--accent)' }} />
+              <span>{usersCount || 1} online</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Change Video button shown inline inside the sidebar for online mode */}
+        {!isLocal && onChangeVideoClick && (
+          <button 
+            onClick={onChangeVideoClick} 
+            style={{ 
+              width: '100%', 
+              padding: '0.55rem', 
+              fontSize: '0.82rem', 
+              borderRadius: '8px', 
+              display: 'flex', 
+              justifyContent: 'center', 
+              alignItems: 'center', 
+              gap: '6px',
+              fontWeight: 700
+            }}
+          >
+            <Film size={13} /> Change Video Source
+          </button>
+        )}
+      </div>
+
+      <div className="chat-header" style={{ padding: '0.75rem 1.25rem', borderBottom: '1px solid var(--border)' }}>
+        <div className="chat-header-title" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <MessageSquare size={16} style={{ color: 'var(--accent)' }} />
+          <h3 style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Room Chat
+          </h3>
+        </div>
       </div>
 
       <div className="messages-container">

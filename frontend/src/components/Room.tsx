@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useLocation } from 'react-router-dom';
-import { Copy, Users, FolderOpen, GraduationCap, ChevronDown, ChevronRight } from 'lucide-react';
+import { FolderOpen, GraduationCap, ChevronDown, ChevronRight, X } from 'lucide-react';
 import { socket } from '../socket';
 import VideoPlayer from './VideoPlayer';
 import ChatSidebar from './ChatSidebar';
@@ -29,7 +29,8 @@ export default function Room() {
   
   const [expandedSteps, setExpandedSteps] = useState<Record<number, boolean>>({});
   const [expandedSubSteps, setExpandedSubSteps] = useState<Record<string, boolean>>({});
-
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  
   useEffect(() => {
     if (!roomId) return;
     socket.connect();
@@ -43,8 +44,11 @@ export default function Room() {
 
     socket.on('room_state', (state) => {
       setRoomState(state);
-      if (state.url === 'LOCAL_FILE') setSidebarTab('local');
-      else if (state.url.includes('youtube') || state.url.includes('youtu.be')) setSidebarTab('course');
+      if (state.url === 'LOCAL_FILE') {
+        setSidebarTab('local');
+      } else if (state.url && (state.url.includes('youtube') || state.url.includes('youtu.be'))) {
+        setSidebarTab('course');
+      }
     });
 
     socket.on('video_update', (data) => {
@@ -94,120 +98,94 @@ export default function Room() {
     setExpandedSubSteps(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
-  const copyRoomId = () => {
-    if (roomId) navigator.clipboard.writeText(roomId);
-  };
+
 
   return (
     <div className="room-layout">
-      <aside className="chat-sidebar" style={{ width: '380px' }}>
-        <div style={{ display: 'flex', borderBottom: '1px solid var(--border)' }}>
-          <button 
-            onClick={() => setSidebarTab('local')}
-            style={{ 
-              flex: 1, borderRadius: 0, background: sidebarTab === 'local' ? 'var(--bg-input)' : 'transparent',
-              borderBottom: sidebarTab === 'local' ? '2px solid var(--accent)' : 'none'
-            }}
-          >
-            <FolderOpen size={16} /> Local
-          </button>
-          <button 
-            onClick={() => setSidebarTab('course')}
-            style={{ 
-              flex: 1, borderRadius: 0, background: sidebarTab === 'course' ? 'var(--bg-input)' : 'transparent',
-              borderBottom: sidebarTab === 'course' ? '2px solid var(--accent)' : 'none'
-            }}
-          >
-            <GraduationCap size={16} /> A2Z Course
-          </button>
-        </div>
-
-        <div className="messages-container" style={{ padding: '0.5rem' }}>
-          {sidebarTab === 'local' ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <label className="copy-btn" style={{ cursor: 'pointer', background: 'var(--success)', marginBottom: '10px' }}>
-                <FolderOpen size={18} /> {sortedFiles.length > 0 ? 'Change Folder' : 'Select Folder'}
-                <input 
-                  type="file" 
-                  {...({ webkitdirectory: "true", directory: "" } as any)} 
-                  onChange={handleFolderChange} 
-                  style={{ display: 'none' }} 
-                />
-              </label>
-              {sortedFiles.map((file, idx) => (
-                <button key={idx} onClick={() => selectLocalVideo(idx)} style={{
-                  textAlign: 'left', padding: '10px', fontSize: '0.85rem', width: '100%', border: 'none', color: 'white',
-                  background: (roomState.isLocal && roomState.fileIndex === idx) ? 'var(--accent)' : 'rgba(255,255,255,0.05)',
-                  borderRadius: '4px', cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
-                }}>
-                  {idx + 1}. {file.name}
-                </button>
-              ))}
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              {dsaCourseData.map((step, sIdx) => (
-                <div key={sIdx} style={{ marginBottom: '4px' }}>
-                  <button onClick={() => toggleStep(sIdx)} style={{
-                    width: '100%', textAlign: 'left', background: 'rgba(255,255,255,0.08)', padding: '10px',
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between', border: 'none', color: 'white', borderRadius: '4px'
-                  }}>
-                    <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>{step.title}</span>
-                    {expandedSteps[sIdx] ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                  </button>
-                  
-                  {expandedSteps[sIdx] && (
-                    <div style={{ paddingLeft: '10px', marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      {step.subSteps.map((sub, subIdx) => (
-                        <div key={subIdx}>
-                          <button onClick={() => toggleSubStep(sIdx, subIdx)} style={{
-                            width: '100%', textAlign: 'left', background: 'rgba(255,255,255,0.04)', padding: '8px',
-                            display: 'flex', alignItems: 'center', justifyContent: 'space-between', border: 'none', color: 'var(--text-muted)', borderRadius: '4px'
-                          }}>
-                            <span style={{ fontSize: '0.85rem' }}>{sub.title}</span>
-                            {expandedSubSteps[`${sIdx}-${subIdx}`] ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                          </button>
-                          
-                          {expandedSubSteps[`${sIdx}-${subIdx}`] && (
-                            <div style={{ paddingLeft: '10px', marginTop: '2px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                              {sub.topics.map((topic, tIdx) => (
-                                <button key={tIdx} onClick={() => selectCourseVideo(topic.url)} style={{
-                                  textAlign: 'left', padding: '6px 10px', fontSize: '0.75rem', width: '100%', border: 'none',
-                                  background: roomState.url === topic.url ? 'var(--accent)' : 'transparent',
-                                  borderRadius: '4px', cursor: 'pointer', color: roomState.url === topic.url ? 'white' : 'var(--text-muted)'
-                                }}>
-                                  • {topic.title}
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </aside>
-
-      <div className="main-content" style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-        <header className="room-header">
-          <div className="room-info">
-            <h2>Room: {roomId}</h2>
-            <p>{roomState.isLocal ? 'Folder Sync' : 'Online Course Mode'}</p>
-          </div>
-          <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-muted)' }}>
-              <Users size={18} /> {roomState.users || 1}
-            </div>
-            <button className="copy-btn" onClick={copyRoomId}>
-              <Copy size={18} /> Copy ID
+      {/* Render left sidebar only in Local File mode */}
+      {roomState.isLocal && (
+        <aside className="left-sidebar">
+          <div className="left-sidebar-tabs">
+            <button 
+              onClick={() => setSidebarTab('local')}
+              className={`left-sidebar-tab-btn ${sidebarTab === 'local' ? 'active' : ''}`}
+            >
+              <FolderOpen size={16} /> Local Folder
+            </button>
+            <button 
+              onClick={() => setSidebarTab('course')}
+              className={`left-sidebar-tab-btn ${sidebarTab === 'course' ? 'active' : ''}`}
+            >
+              <GraduationCap size={16} /> A2Z Course
             </button>
           </div>
-        </header>
 
+          <div className="left-sidebar-content">
+            {sidebarTab === 'local' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <label className="copy-btn" style={{ cursor: 'pointer', background: 'var(--success)', color: 'white', display: 'flex', justifyContent: 'center', marginBottom: '10px', border: 'none' }}>
+                  <FolderOpen size={18} /> {sortedFiles.length > 0 ? 'Change Folder' : 'Select Folder'}
+                  <input 
+                    type="file" 
+                    {...({ webkitdirectory: "true", directory: "" } as any)} 
+                    onChange={handleFolderChange} 
+                    style={{ display: 'none' }} 
+                  />
+                </label>
+                {sortedFiles.map((file, idx) => (
+                  <button 
+                    key={idx} 
+                    onClick={() => selectLocalVideo(idx)} 
+                    className={`local-file-item ${(roomState.isLocal && roomState.fileIndex === idx) ? 'active' : ''}`}
+                  >
+                    {idx + 1}. {file.name}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                {dsaCourseData.map((step, sIdx) => (
+                  <div key={sIdx} style={{ marginBottom: '4px' }}>
+                    <button onClick={() => toggleStep(sIdx)} className="course-step-button">
+                      <span style={{ fontWeight: 600 }}>{step.title}</span>
+                      {expandedSteps[sIdx] ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                    </button>
+                    
+                    {expandedSteps[sIdx] && (
+                      <div style={{ paddingLeft: '10px', marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        {step.subSteps.map((sub, subIdx) => (
+                          <div key={subIdx}>
+                            <button onClick={() => toggleSubStep(sIdx, subIdx)} className="course-substep-button">
+                              <span>{sub.title}</span>
+                              {expandedSubSteps[`${sIdx}-${subIdx}`] ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                            </button>
+                            
+                            {expandedSubSteps[`${sIdx}-${subIdx}`] && (
+                              <div style={{ paddingLeft: '10px', marginTop: '2px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                {sub.topics.map((topic, tIdx) => (
+                                  <button 
+                                    key={tIdx} 
+                                    onClick={() => selectCourseVideo(topic.url)} 
+                                    className={`course-topic-button ${roomState.url === topic.url ? 'active' : ''}`}
+                                  >
+                                    • {topic.title}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </aside>
+      )}
+
+      <div className="main-content">
         <div className="video-container">
           <VideoPlayer 
             url={roomState.isLocal ? (localFileUrl || 'LOCAL_WAITING') : roomState.url} 
@@ -223,7 +201,111 @@ export default function Room() {
           />
         </div>
       </div>
-      <ChatSidebar username={username} />
+      
+      <ChatSidebar 
+        username={username} 
+        roomId={roomId}
+        isLocal={roomState.isLocal}
+        usersCount={roomState.users}
+        onChangeVideoClick={() => setIsModalOpen(true)}
+      />
+
+      {/* Change Video Overlay Modal Drawer */}
+      {isModalOpen && (
+        <div className="modal-backdrop" onClick={() => setIsModalOpen(false)}>
+          <div className="modal-container" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Change Video Source</h3>
+              <button className="modal-close-btn" onClick={() => setIsModalOpen(false)}>
+                <X size={20} />
+              </button>
+            </div>
+            <div className="modal-body">
+              <div className="modal-section">
+                <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Stream Online Video
+                </label>
+                <form onSubmit={(e) => {
+                  e.preventDefault();
+                  const form = e.currentTarget;
+                  const inputEl = form.elements.namedItem('videoUrlInput') as HTMLInputElement;
+                  if (inputEl && inputEl.value.trim()) {
+                    selectCourseVideo(inputEl.value.trim());
+                    setIsModalOpen(false);
+                  }
+                }} style={{ display: 'flex', gap: '8px' }}>
+                  <input 
+                    name="videoUrlInput"
+                    type="url" 
+                    placeholder="Paste YouTube link or direct video URL..." 
+                    defaultValue={roomState.isLocal ? '' : roomState.url}
+                    required
+                  />
+                  <button type="submit">Load</button>
+                </form>
+              </div>
+
+              <div className="divider">OR SELECT COURSE TOPIC</div>
+
+              <div className="modal-section" style={{ maxHeight: '40vh', overflowY: 'auto', paddingRight: '4px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  {dsaCourseData.map((step, sIdx) => (
+                    <div key={sIdx} style={{ marginBottom: '4px' }}>
+                      <button onClick={() => toggleStep(sIdx)} className="course-step-button">
+                        <span style={{ fontWeight: 600 }}>{step.title}</span>
+                        {expandedSteps[sIdx] ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                      </button>
+                      
+                      {expandedSteps[sIdx] && (
+                        <div style={{ paddingLeft: '10px', marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          {step.subSteps.map((sub, subIdx) => (
+                            <div key={subIdx}>
+                              <button onClick={() => toggleSubStep(sIdx, subIdx)} className="course-substep-button">
+                                <span>{sub.title}</span>
+                                {expandedSubSteps[`${sIdx}-${subIdx}`] ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                              </button>
+                              
+                              {expandedSubSteps[`${sIdx}-${subIdx}`] && (
+                                <div style={{ paddingLeft: '10px', marginTop: '2px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                  {sub.topics.map((topic, tIdx) => (
+                                    <button 
+                                      key={tIdx} 
+                                      onClick={() => {
+                                        selectCourseVideo(topic.url);
+                                        setIsModalOpen(false);
+                                      }} 
+                                      className={`course-topic-button ${roomState.url === topic.url ? 'active' : ''}`}
+                                    >
+                                      • {topic.title}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="modal-section" style={{ borderTop: '1px solid var(--border)', paddingTop: '1.25rem', marginTop: '1rem' }}>
+                <button 
+                  onClick={() => {
+                    socket.emit('video_update', { isLocal: true, url: 'LOCAL_FILE', playing: false, time: 0 });
+                    setIsModalOpen(false);
+                  }}
+                  style={{ width: '100%', background: 'rgba(255, 255, 255, 0.03)', color: 'var(--text-main)', border: '1px solid var(--border)' }}
+                >
+                  <FolderOpen size={16} /> Switch to Local Folder Sync
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+

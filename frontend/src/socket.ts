@@ -1,6 +1,6 @@
 import { io } from 'socket.io-client';
 
-// Ensure this matches the backend port
+// Always connect to the deployed Render backend
 const URL = 'https://syncstream-nv7d.onrender.com';
 
 export const socket = io(URL, {
