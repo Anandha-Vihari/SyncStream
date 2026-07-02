@@ -43,11 +43,25 @@ export default function Room() {
     });
 
     socket.on('room_state', (state) => {
-      setRoomState(prev => ({ ...prev, ...state }));
-      if (state.url === 'LOCAL_FILE') {
+      setRoomState(prev => {
+        const mergedUrl = state.url || prev.url;
+        return {
+          ...prev,
+          ...state,
+          url: mergedUrl
+        };
+      });
+
+      const effectiveUrl = state.url || (isUrlLocalParam ? 'LOCAL_FILE' : initialUrl);
+      if (effectiveUrl === 'LOCAL_FILE') {
         setSidebarTab('local');
-      } else if (state.url && (state.url.includes('youtube') || state.url.includes('youtu.be'))) {
+      } else if (effectiveUrl && (effectiveUrl.includes('youtube') || effectiveUrl.includes('youtu.be'))) {
         setSidebarTab('course');
+      }
+
+      // If the server doesn't have the URL yet, update it
+      if (!state.url && effectiveUrl && effectiveUrl !== 'LOCAL_FILE') {
+        socket.emit('video_update', { isLocal: false, url: effectiveUrl, time: 0, playing: false });
       }
     });
 
