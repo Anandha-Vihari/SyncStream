@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import Hls from 'hls.js';
 import { socket } from '../socket';
 
 interface VideoPlayerProps {
@@ -36,6 +37,14 @@ export default function VideoPlayer({ url, playing, time, isLocal, onEnded }: Vi
   })();
 
   const isYouTube = !isLocal && youtubeId !== null;
+  const isHls = !isLocal && (url.toLowerCase().includes('.m3u8') || url.toLowerCase().includes('/m3u8'));
+  const isEmbed = !isLocal && !isYouTube && !isHls && (
+    url.toLowerCase().includes('/embed/') || 
+    url.toLowerCase().includes('vidsrc') || 
+    url.toLowerCase().includes('player') || 
+    url.toLowerCase().includes('embed') ||
+    url.toLowerCase().includes('iframe')
+  );
 
   // Initialize refs to initial props to prevent boot-up loops
   const lastEmittedTime = useRef(time);
@@ -93,6 +102,49 @@ export default function VideoPlayer({ url, playing, time, isLocal, onEnded }: Vi
       clearInterval(interval);
     };
   }, []);
+
+  // Initialize/Update HLS player
+  useEffect(() => {
+    let hlsInstance: Hls | null = null;
+
+    if (isHls && videoRef.current) {
+      if (Hls.isSupported()) {
+        hlsInstance = new Hls({
+          enableWorker: true,
+          lowLatencyMode: true,
+        });
+        hlsInstance.loadSource(url);
+        hlsInstance.attachMedia(videoRef.current);
+        
+        hlsInstance.on(Hls.Events.ERROR, function (_, data) {
+          if (data.fatal) {
+            switch (data.type) {
+              case Hls.ErrorTypes.NETWORK_ERROR:
+                console.error("HLS network error, trying to recover...");
+                hlsInstance?.startLoad();
+                break;
+              case Hls.ErrorTypes.MEDIA_ERROR:
+                console.error("HLS media error, trying to recover...");
+                hlsInstance?.recoverMediaError();
+                break;
+              default:
+                console.error("HLS fatal error:", data);
+                break;
+            }
+          }
+        });
+      } else if (videoRef.current.canPlayType('application/vnd.apple.mpegurl')) {
+        // Native HLS support (Safari)
+        videoRef.current.src = url;
+      }
+    }
+
+    return () => {
+      if (hlsInstance) {
+        hlsInstance.destroy();
+      }
+    };
+  }, [isHls, url]);
 
   // Initialize/Update YouTube Player
   useEffect(() => {
@@ -300,10 +352,35 @@ export default function VideoPlayer({ url, playing, time, isLocal, onEnded }: Vi
       onMouseLeave={handleMouseLeave}
       style={{ position: 'relative', width: '100%', height: '100%', minHeight: '480px', background: '#000', borderRadius: '8px', overflow: 'hidden' }}
     >
-      {isLocal || !isYouTube ? (
+      {isEmbed ? (
+        <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+          <iframe 
+            src={url}
+            style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', border: 'none' }}
+            allowFullScreen
+            allow="autoplay; encrypted-media; picture-in-picture"
+          />
+          <div style={{
+            position: 'absolute',
+            bottom: '10px',
+            left: '10px',
+            background: 'rgba(7, 9, 19, 0.85)',
+            backdropFilter: 'blur(8px)',
+            border: '1px solid var(--border)',
+            padding: '6px 12px',
+            borderRadius: '6px',
+            fontSize: '0.75rem',
+            color: 'var(--text-muted)',
+            zIndex: 10,
+            pointerEvents: 'none'
+          }}>
+            ⚠️ Embed Mode: Auto-sync disabled. Extract & paste the direct .m3u8 stream link for full sync.
+          </div>
+        </div>
+      ) : isLocal || !isYouTube ? (
         <video 
           ref={videoRef}
-          src={url}
+          src={isHls ? undefined : url}
           controls
           style={{ width: '100%', height: '100%' }}
           onPlay={() => emitLocalUpdate(true)}
